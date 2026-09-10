@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from playwright.sync_api import sync_playwright, Page
 
-from scraper.config import USER_AGENT, LOCALE
+from sources.prodoctorov.config import USER_AGENT, LOCALE
 
 
 @contextmanager

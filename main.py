@@ -1,55 +1,61 @@
-from scraper.catalog import fetch_doctor_slugs
-from scraper.fetcher import fetch_new_reviews_html, build_doctor_url
-from scraper.parser import parse_reviews
+from sources.prodoctorov.adapter import ProdoctorovSource
 from storage import save_json, load_json, json_exists, merge_reviews
-from scraper.config import SPECIALITIES, CITIES
-from scraper.ids import make_review_id
+from config import SPECIALITIES, CITIES, DOCTORS_PER_SPECIALITY_LIMIT
+from ids import make_review_id
 
-DOCTORS_PER_SPECIALITY_LIMIT = 5
+ACTIVE_SOURCES = [ProdoctorovSource()]
 
 INDEX_PATH = "data/processed/doctors/index.json"
 doctor_index = load_json(INDEX_PATH) if json_exists(INDEX_PATH) else {}
 
 targets = [(spec, city) for spec in SPECIALITIES for city in CITIES]
 
-for speciality_slug, city in targets:
-    known_slugs_for_speciality = {
-        slug for slug, info in doctor_index.items()
-        if speciality_slug in info["specialities"] and info["city"] == city
-    }
+for source in ACTIVE_SOURCES:
+    for speciality_slug, city in targets:
+        index_key_prefix = f"{source.name}:"
+        known_refs_for_speciality = {
+            key.removeprefix(index_key_prefix)
+            for key, info in doctor_index.items()
+            if key.startswith(index_key_prefix)
+            and speciality_slug in info["specialities"]
+            and info["city"] == city
+        }
 
-    fresh_slugs = set(fetch_doctor_slugs(speciality_slug, city))
-    new_doctors = fresh_slugs - known_slugs_for_speciality
+        fresh_doctors = source.list_doctors(speciality_slug, city)
+        fresh_ids = {d.site_doctor_id for d in fresh_doctors}
+        new_ids = fresh_ids - known_refs_for_speciality
 
-    print(f"[DEBUG] {speciality_slug}/{city}: всего {len(fresh_slugs)}, новых врачей {len(new_doctors)}")
+        print(f"[DEBUG] {source.name}/{speciality_slug}/{city}: всего {len(fresh_ids)}, новых врачей {len(new_ids)}")
 
-    for slug in fresh_slugs:
-        entry = doctor_index.setdefault(slug, {"city": city, "specialities": []})
-        if speciality_slug not in entry["specialities"]:
-            entry["specialities"].append(speciality_slug)
+        for doctor in fresh_doctors:
+            index_key = f"{source.name}:{doctor.site_doctor_id}"
+            entry = doctor_index.setdefault(index_key, {
+                "source": source.name,
+                "site_doctor_id": doctor.site_doctor_id,
+                "profile_url": doctor.profile_url,
+                "city": city,
+                "specialities": [],
+            })
+            if speciality_slug not in entry["specialities"]:
+                entry["specialities"].append(speciality_slug)
 
-    slugs_to_process = sorted(fresh_slugs)
-    if DOCTORS_PER_SPECIALITY_LIMIT is not None:
-        slugs_to_process = slugs_to_process[:DOCTORS_PER_SPECIALITY_LIMIT]
-        print(f"[DEBUG] Тестовый режим: беру только {len(slugs_to_process)} врачей из {len(fresh_slugs)}")
+        doctors_to_process = sorted(fresh_doctors, key=lambda d: d.site_doctor_id)
+        if DOCTORS_PER_SPECIALITY_LIMIT is not None:
+            doctors_to_process = doctors_to_process[:DOCTORS_PER_SPECIALITY_LIMIT]
+            print(f"[DEBUG] Тестовый режим: беру только {len(doctors_to_process)} врачей из {len(fresh_doctors)}")
 
-    for slug in slugs_to_process:
-        reviews_path = f"data/processed/reviews/{slug}.json"
-        existing_reviews = load_json(reviews_path) if json_exists(reviews_path) else []
-        known_ids = {make_review_id(r) for r in existing_reviews}
+        for doctor in doctors_to_process:
+            reviews_path = f"data/processed/reviews/{source.name}/{doctor.site_doctor_id}.json"
+            existing_reviews = load_json(reviews_path) if json_exists(reviews_path) else []
+            known_ids = {make_review_id(r) for r in existing_reviews}
 
-        doctor_url = build_doctor_url(slug, city)
-        pages_html = fetch_new_reviews_html(slug, known_ids, city)
+            new_reviews = source.fetch_new_reviews(doctor, known_ids)
 
-        new_reviews = []
-        for html in pages_html:
-            new_reviews.extend(parse_reviews(html, doctor_url))
-
-        merged, added_count = merge_reviews(existing_reviews, new_reviews, make_review_id)
-        if added_count > 0:
-            save_json(merged, reviews_path)
-            print(f"[DEBUG] {slug}: добавлено {added_count} новых отзывов")
-        else:
-            print(f"[DEBUG] {slug}: новых отзывов нет")
+            merged, added_count = merge_reviews(existing_reviews, new_reviews, make_review_id)
+            if added_count > 0:
+                save_json(merged, reviews_path)
+                print(f"[DEBUG] {doctor.site_doctor_id}: добавлено {added_count} новых отзывов")
+            else:
+                print(f"[DEBUG] {doctor.site_doctor_id}: новых отзывов нет")
 
 save_json(doctor_index, INDEX_PATH)

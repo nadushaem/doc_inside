@@ -1,12 +1,19 @@
 import re
-from scraper.browser import get_page
-from scraper.config import BASE_DOMAIN, PAGE_LOAD_TIMEOUT_MS, BETWEEN_PAGES_DELAY_MS, MAX_PAGES_SAFETY_LIMIT
+from sources.base import DoctorRef
+from sources.prodoctorov.browser import get_page
+from sources.prodoctorov.config import (
+    BASE_DOMAIN, PAGE_LOAD_TIMEOUT_MS, BETWEEN_PAGES_DELAY_MS, MAX_PAGES_SAFETY_LIMIT,
+)
 
 DOCTOR_LINK_PATTERN = re.compile(r"/vrach/(\d+-[^/#?]+)")
 
 
-def fetch_doctor_slugs(speciality_slug: str, city: str) -> list[str]:
-    """Собирает уникальные slug'и всех врачей заданной специальности в городе, обходя пагинацию каталога."""
+def build_doctor_url(doctor_slug: str, city: str) -> str:
+    return f"{BASE_DOMAIN}/{city}/vrach/{doctor_slug}/"
+
+
+def list_doctors(speciality_slug: str, city: str) -> list[DoctorRef]:
+    """Собирает уникальные slug'и всех врачей заданной специальности в городе."""
     base_url = f"{BASE_DOMAIN}/{city}/{speciality_slug}/"
     all_slugs = set()
 
@@ -39,4 +46,7 @@ def fetch_doctor_slugs(speciality_slug: str, city: str) -> list[str]:
 
             page_num += 1
 
-    return sorted(all_slugs)
+    return [
+        DoctorRef(site_doctor_id=slug, profile_url=build_doctor_url(slug, city))
+        for slug in sorted(all_slugs)
+    ]

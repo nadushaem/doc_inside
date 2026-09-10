@@ -2,7 +2,9 @@ import re
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-from scraper.config import MONTHS_RU
+from sources.prodoctorov.config import MONTHS_RU
+
+SOURCE_NAME = "prodoctorov"
 
 
 def parse_review_date(date_raw: str | None) -> str | None:
@@ -41,25 +43,22 @@ def parse_reviews(html: str, doctor_url: str) -> list[dict]:
         is_positive = any("positive" in c for c in classes)
         is_negative = any("negative" in c for c in classes)
 
-        author_tag = card.select_one(".b-review-card__author-name")
         comment_tag = card.select_one(".b-review-card__comment")
         date_tag = card.select_one(".b-review-card__datetime")
-        reply_tag = card.select_one(".b-review-card__reply-body")
 
         text = clean_text_node(comment_tag)
-
         if not text:
             continue
 
         date_raw = date_tag.get_text(strip=True) if date_tag else None
 
         reviews.append({
-            "doctor_url": doctor_url,
-            "author": author_tag.get_text(strip=True) if author_tag else None,
             "text": text,
+            "source": SOURCE_NAME,
+            "doctor_url": doctor_url,
             "date_raw": date_raw,
             "date_iso": parse_review_date(date_raw),
-            "clinic_reply": clean_text_node(reply_tag),
+            "rating": None,  # на prodoctorov числового рейтинга в HTML нет
             "site_sentiment": "positive" if is_positive else ("negative" if is_negative else "neutral"),
         })
 
