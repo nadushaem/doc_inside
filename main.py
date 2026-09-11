@@ -1,9 +1,10 @@
 from sources.prodoctorov.adapter import ProdoctorovSource
+from sources.napopravku.adapter import NapopravkuSource
 from storage import save_json, load_json, json_exists, merge_reviews
 from config import SPECIALITIES, CITIES, DOCTORS_PER_SPECIALITY_LIMIT
 from ids import make_review_id
 
-ACTIVE_SOURCES = [ProdoctorovSource()]
+ACTIVE_SOURCES = [NapopravkuSource()]
 
 INDEX_PATH = "data/processed/doctors/index.json"
 doctor_index = load_json(INDEX_PATH) if json_exists(INDEX_PATH) else {}
