@@ -1,10 +1,12 @@
+import traceback
+
 from sources.prodoctorov.adapter import ProdoctorovSource
 from sources.napopravku.adapter import NapopravkuSource
 from storage import save_json, load_json, json_exists, merge_reviews
 from config import SPECIALITIES, CITIES, DOCTORS_PER_SPECIALITY_LIMIT
 from ids import make_review_id
 
-ACTIVE_SOURCES = [NapopravkuSource()]
+ACTIVE_SOURCES = [ProdoctorovSource(), NapopravkuSource()]
 
 INDEX_PATH = "data/processed/doctors/index.json"
 doctor_index = load_json(INDEX_PATH) if json_exists(INDEX_PATH) else {}
@@ -13,50 +15,77 @@ targets = [(spec, city) for spec in SPECIALITIES for city in CITIES]
 
 for source in ACTIVE_SOURCES:
     for speciality_slug, city in targets:
-        index_key_prefix = f"{source.name}:"
-        known_refs_for_speciality = {
-            key.removeprefix(index_key_prefix)
-            for key, info in doctor_index.items()
-            if key.startswith(index_key_prefix)
-            and speciality_slug in info["specialities"]
-            and info["city"] == city
-        }
+        try:
+            index_key_prefix = f"{source.name}:"
+            known_refs_for_speciality = {
+                key.removeprefix(index_key_prefix)
+                for key, info in doctor_index.items()
+                if key.startswith(index_key_prefix)
+                and speciality_slug in info["specialities"]
+                and info["city"] == city
+            }
 
-        fresh_doctors = source.list_doctors(speciality_slug, city)
-        fresh_ids = {d.site_doctor_id for d in fresh_doctors}
-        new_ids = fresh_ids - known_refs_for_speciality
+            fresh_doctors = source.list_doctors(speciality_slug, city)
+            fresh_ids = {d.site_doctor_id for d in fresh_doctors}
+            new_ids = fresh_ids - known_refs_for_speciality
 
-        print(f"[DEBUG] {source.name}/{speciality_slug}/{city}: всего {len(fresh_ids)}, новых врачей {len(new_ids)}")
+            print(f"[DEBUG] {source.name}/{speciality_slug}/{city}: всего {len(fresh_ids)}, новых врачей {len(new_ids)}")
 
-        for doctor in fresh_doctors:
-            index_key = f"{source.name}:{doctor.site_doctor_id}"
-            entry = doctor_index.setdefault(index_key, {
-                "source": source.name,
-                "site_doctor_id": doctor.site_doctor_id,
-                "profile_url": doctor.profile_url,
-                "city": city,
-                "specialities": [],
-            })
-            if speciality_slug not in entry["specialities"]:
-                entry["specialities"].append(speciality_slug)
+            if not fresh_doctors:
+                print(f"[WARNING] {source.name}/{speciality_slug}/{city}: пустой список врачей, пропускаю.")
+                continue
 
-        doctors_to_process = sorted(fresh_doctors, key=lambda d: d.site_doctor_id)
-        if DOCTORS_PER_SPECIALITY_LIMIT is not None:
-            doctors_to_process = doctors_to_process[:DOCTORS_PER_SPECIALITY_LIMIT]
-            print(f"[DEBUG] Тестовый режим: беру только {len(doctors_to_process)} врачей из {len(fresh_doctors)}")
+            for doctor in fresh_doctors:
+                index_key = f"{source.name}:{doctor.site_doctor_id}"
+                entry = doctor_index.setdefault(index_key, {
+                    "source": source.name,
+                    "site_doctor_id": doctor.site_doctor_id,
+                    "profile_url": doctor.profile_url,
+                    "full_name": doctor.full_name,
+                    "city": city,
+                    "specialities": [],
+                })
+                if entry.get("full_name") is None and doctor.full_name:
+                    entry["full_name"] = doctor.full_name
+                if speciality_slug not in entry["specialities"]:
+                    entry["specialities"].append(speciality_slug)
 
-        for doctor in doctors_to_process:
-            reviews_path = f"data/processed/reviews/{source.name}/{doctor.site_doctor_id}.json"
-            existing_reviews = load_json(reviews_path) if json_exists(reviews_path) else []
-            known_ids = {make_review_id(r) for r in existing_reviews}
+            doctors_to_process = sorted(fresh_doctors, key=lambda d: d.site_doctor_id)
+            if DOCTORS_PER_SPECIALITY_LIMIT is not None:
+                doctors_to_process = doctors_to_process[:DOCTORS_PER_SPECIALITY_LIMIT]
+                print(f"[DEBUG] Тестовый режим: беру только {len(doctors_to_process)} врачей из {len(fresh_doctors)}")
 
-            new_reviews = source.fetch_new_reviews(doctor, known_ids)
+            for doctor in doctors_to_process:
+                try:
+                    reviews_path = f"data/processed/reviews/{source.name}/{doctor.site_doctor_id}.json"
+                    existing_reviews = load_json(reviews_path) if json_exists(reviews_path) else []
+                    known_ids = {make_review_id(r) for r in existing_reviews}
 
-            merged, added_count = merge_reviews(existing_reviews, new_reviews, make_review_id)
-            if added_count > 0:
-                save_json(merged, reviews_path)
-                print(f"[DEBUG] {doctor.site_doctor_id}: добавлено {added_count} новых отзывов")
-            else:
-                print(f"[DEBUG] {doctor.site_doctor_id}: новых отзывов нет")
+                    new_reviews, profile = source.fetch_new_reviews(doctor, known_ids)
 
-save_json(doctor_index, INDEX_PATH)
+                    index_key = f"{source.name}:{doctor.site_doctor_id}"
+                    if profile.get("full_name"):
+                        doctor_index[index_key]["full_name"] = profile["full_name"]
+                    for field in ("university", "graduation_year", "degree_speciality"):
+                        if profile.get(field):
+                            doctor_index[index_key][field] = profile[field]
+
+                    merged, added_count = merge_reviews(existing_reviews, new_reviews, make_review_id)
+                    if added_count > 0:
+                        save_json(merged, reviews_path)
+                        print(f"[DEBUG] {doctor.site_doctor_id}: добавлено {added_count} новых отзывов")
+                    else:
+                        print(f"[DEBUG] {doctor.site_doctor_id}: новых отзывов нет")
+
+                except Exception:
+                    print(f"[ERROR] Сбой на враче {source.name}:{doctor.site_doctor_id}, пропускаю:")
+                    traceback.print_exc()
+                    continue
+
+            save_json(doctor_index, INDEX_PATH)
+
+        except Exception:
+            print(f"[ERROR] Сбой на {source.name}/{speciality_slug}/{city}, пропускаю:")
+            traceback.print_exc()
+            save_json(doctor_index, INDEX_PATH)
+            continue

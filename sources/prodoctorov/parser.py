@@ -63,3 +63,41 @@ def parse_reviews(html: str, doctor_url: str) -> list[dict]:
         })
 
     return reviews
+
+
+def parse_doctor_profile(html: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+
+    name_tag = soup.select_one('h1 [itemprop="name"]')
+    full_name = normalize_text(name_tag.get_text(" ", strip=True)) if name_tag else None
+
+    university = None
+    graduation_year = None
+    degree_speciality = None
+    current_title = None
+
+    for el in soup.select(".b-doctor-details__data-title, .b-doctor-details__item-description"):
+        if "b-doctor-details__data-title" in el.get("class", []):
+            current_title = normalize_text(el.get_text(" ", strip=True))
+            continue
+
+        label_tag = el.select_one(".text-info--text:last-child")
+        label = label_tag.get_text(strip=True).lower() if label_tag else ""
+        if "базовое" not in label:
+            continue  # ординатура/интернатура/доп. образование пропускаем
+
+        divs = el.find_all("div", recursive=False)
+        if len(divs) >= 2:
+            year_text = divs[0].get_text(strip=True)
+            degree_speciality = normalize_text(divs[1].get_text(" ", strip=True))
+            if year_text.isdigit():
+                graduation_year = int(year_text)
+        university = current_title
+        break  # берём первое базовое образование, специалитет обычно один
+
+    return {
+        "full_name": full_name,
+        "university": university,
+        "graduation_year": graduation_year,
+        "degree_speciality": degree_speciality,
+    }

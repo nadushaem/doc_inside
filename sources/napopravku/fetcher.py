@@ -1,6 +1,6 @@
 from sources.napopravku.browser import get_page, goto_with_retry
 from sources.napopravku.config import PAGE_LOAD_TIMEOUT_MS, BETWEEN_PAGES_DELAY_MS, MAX_SHOW_MORE_CLICKS
-from sources.napopravku.parser import parse_reviews
+from sources.napopravku.parser import parse_reviews, parse_doctor_profile
 from ids import make_review_id
 
 SHOW_MORE_SELECTOR = ".doctor-review__btn-wrapper button.doctor-review__btn"
@@ -19,6 +19,9 @@ def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> list[dict
     with get_page() as page:
         goto_with_retry(page, profile_url, PAGE_LOAD_TIMEOUT_MS)
         page.wait_for_timeout(BETWEEN_PAGES_DELAY_MS)
+
+        first_html = page.content()
+        profile = parse_doctor_profile(first_html)
 
         _sort_reviews_by_date(page)
 
@@ -48,6 +51,7 @@ def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> list[dict
         html = page.content()
         all_reviews = parse_reviews(html, profile_url)
 
-    if not known_review_ids:
-        return all_reviews
-    return [r for r in all_reviews if make_review_id(r) not in known_review_ids]
+    new_reviews = all_reviews if not known_review_ids else [
+        r for r in all_reviews if make_review_id(r) not in known_review_ids
+    ]
+    return new_reviews, profile

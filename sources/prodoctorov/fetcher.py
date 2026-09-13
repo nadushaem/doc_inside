@@ -1,20 +1,22 @@
 from sources.prodoctorov.browser import get_page
 from sources.prodoctorov.config import PAGE_LOAD_TIMEOUT_MS, BETWEEN_PAGES_DELAY_MS, MAX_PAGES_SAFETY_LIMIT
-from sources.prodoctorov.parser import parse_reviews
+from sources.prodoctorov.parser import parse_reviews, parse_doctor_profile
 from ids import make_review_id
 
 
-def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> list[dict]:
-    """
-    Идёт по страницам пагинации отзывов врача (от новых к старым) и сразу
-    парсит их в готовые словари. Останавливается, как только встречает
-    страницу с уже известным review_id. Если known_review_ids пуст —
-    ведёт себя как полный обход.
-    """
+def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> tuple[list[dict], dict]:
     base_url = profile_url.rstrip("/") + "/otzivi/"
     collected = []
+    profile = {}
 
     with get_page() as page:
+        resp = page.goto(profile_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+        page.wait_for_timeout(BETWEEN_PAGES_DELAY_MS)
+        if resp.status == 200:
+            profile = parse_doctor_profile(page.content())
+        else:
+            print(f"[WARNING] prodoctorov: не удалось открыть профиль {profile_url} (status={resp.status})")
+
         page_num = 1
         while True:
             url = base_url if page_num == 1 else f"{base_url}{page_num}/"
@@ -43,4 +45,4 @@ def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> list[dict
                 break
             page_num += 1
 
-    return collected
+    return collected, profile

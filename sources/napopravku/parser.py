@@ -57,3 +57,34 @@ def parse_reviews(html: str, doctor_url: str) -> list[dict]:
         })
 
     return reviews
+
+
+def parse_doctor_profile(html: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+
+    university = None
+    graduation_year = None
+
+    for section in soup.select(".doctor-description__section"):
+        title = section.select_one(".doctor-description__title")
+        if not title or "образован" not in title.get_text(strip=True).lower():
+            continue
+        for text_block in section.select(".doctor-description__text"):
+            if text_block.find_parent("ul") is not None:
+                continue
+            raw = normalize_text(text_block.get_text(" ", strip=True))
+            if not raw:
+                continue
+            m = re.match(r"(.+?)\s*\((\d{4})\)\s*$", raw)
+            if m:
+                university, year_str = m.groups()
+                graduation_year = int(year_str)
+            else:
+                university = raw
+            break
+        break
+
+    return {
+        "university": university,
+        "graduation_year": graduation_year,
+    }
