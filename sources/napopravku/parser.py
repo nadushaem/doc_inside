@@ -75,7 +75,7 @@ def parse_doctor_profile(html: str) -> dict:
             raw = normalize_text(text_block.get_text(" ", strip=True))
             if not raw:
                 continue
-            m = re.match(r"(.+?)\s*\((\d{4})\)\s*$", raw)
+            m = re.match(r"(.+?)[,\s]*\(?(\d{4})\)?\s*$", raw)
             if m:
                 university, year_str = m.groups()
                 graduation_year = int(year_str)
