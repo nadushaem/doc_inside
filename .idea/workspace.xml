@@ -4,8 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9f030c7a-2fbf-474a-a5dd-e0fed10adf0a" name="Changes" comment="Fix minor errors">
+    <list default="true" id="9f030c7a-2fbf-474a-a5dd-e0fed10adf0a" name="Changes" comment="Fix the extraction of the year of graduation from education">
+      <change afterPath="$PROJECT_DIR$/dedupe.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/merge.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sources/prodoctorov/parser.py" beforeDir="false" afterPath="$PROJECT_DIR$/sources/prodoctorov/parser.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -47,10 +50,12 @@
     &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
     &quot;Python.Main.executor&quot;: &quot;Run&quot;,
     &quot;Python.browser.executor&quot;: &quot;Run&quot;,
+    &quot;Python.dedupe.executor&quot;: &quot;Run&quot;,
     &quot;Python.exp.executor&quot;: &quot;Run&quot;,
     &quot;Python.exploration.executor&quot;: &quot;Run&quot;,
     &quot;Python.main.executor&quot;: &quot;Run&quot;,
     &quot;Python.parse_test.executor&quot;: &quot;Run&quot;,
+    &quot;Python.refetch_names.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
@@ -153,7 +158,15 @@
       <option name="project" value="LOCAL" />
       <updated>1789547511803</updated>
     </task>
-    <option name="localTasksCounter" value="7" />
+    <task id="LOCAL-00007" summary="Fix the extraction of the year of graduation from education">
+      <option name="closed" value="true" />
+      <created>1789550171734</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1789550171734</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
@@ -163,7 +176,8 @@
     <MESSAGE value="Add parsing from napopravku.ru" />
     <MESSAGE value="Add parsing full name and education" />
     <MESSAGE value="Fix minor errors" />
-    <option name="LAST_COMMIT_MESSAGE" value="Fix minor errors" />
+    <MESSAGE value="Fix the extraction of the year of graduation from education" />
+    <option name="LAST_COMMIT_MESSAGE" value="Fix the extraction of the year of graduation from education" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -75,16 +75,21 @@ def parse_doctor_profile(html: str) -> dict:
     graduation_year = None
     degree_speciality = None
     current_title = None
+    education_done = False
 
     for el in soup.select(".b-doctor-details__data-title, .b-doctor-details__item-description"):
         if "b-doctor-details__data-title" in el.get("class", []):
             current_title = normalize_text(el.get_text(" ", strip=True))
             continue
 
+        if education_done or not current_title or "образован" not in current_title.lower():
+            continue
+
         label_tag = el.select_one(".text-info--text:last-child")
         label = label_tag.get_text(strip=True).lower() if label_tag else ""
-        if "базовое" not in label:
-            continue  # ординатура/интернатура/доп. образование пропускаем
+
+        if label and "базовое" not in label:
+            continue  # лейбл явно говорит "ординатура"/"интернатура" — не то, что нужно
 
         divs = el.find_all("div", recursive=False)
         if len(divs) >= 2:
@@ -92,8 +97,19 @@ def parse_doctor_profile(html: str) -> dict:
             degree_speciality = normalize_text(divs[1].get_text(" ", strip=True))
             if year_text.isdigit():
                 graduation_year = int(year_text)
-        university = current_title
-        break  # берём первое базовое образование, специалитет обычно один
+            university = current_title
+            education_done = True
+            continue
+
+        raw = normalize_text(el.get_text(" ", strip=True))
+        if raw:
+            m = re.match(r"(.+?)[,\s]*\(?(\d{4})\)?\s*$", raw)
+            if m:
+                university, year_str = m.groups()
+                graduation_year = int(year_str)
+            else:
+                university = raw
+            education_done = True
 
     return {
         "full_name": full_name,
