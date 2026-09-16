@@ -4,17 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="9f030c7a-2fbf-474a-a5dd-e0fed10adf0a" name="Changes" comment="Add parsing from napopravku.ru">
+    <list default="true" id="9f030c7a-2fbf-474a-a5dd-e0fed10adf0a" name="Changes" comment="Add parsing full name and education">
+      <change afterPath="$PROJECT_DIR$/sources/browser.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sources/base.py" beforeDir="false" afterPath="$PROJECT_DIR$/sources/base.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sources/napopravku/browser.py" beforeDir="false" afterPath="$PROJECT_DIR$/sources/napopravku/browser.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/sources/napopravku/catalog.py" beforeDir="false" afterPath="$PROJECT_DIR$/sources/napopravku/catalog.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/sources/napopravku/fetcher.py" beforeDir="false" afterPath="$PROJECT_DIR$/sources/napopravku/fetcher.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sources/napopravku/parser.py" beforeDir="false" afterPath="$PROJECT_DIR$/sources/napopravku/parser.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/sources/prodoctorov/catalog.py" beforeDir="false" afterPath="$PROJECT_DIR$/sources/prodoctorov/catalog.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/sources/prodoctorov/fetcher.py" beforeDir="false" afterPath="$PROJECT_DIR$/sources/prodoctorov/fetcher.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sources/prodoctorov/parser.py" beforeDir="false" afterPath="$PROJECT_DIR$/sources/prodoctorov/parser.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -146,7 +144,15 @@
       <option name="project" value="LOCAL" />
       <updated>1789112580420</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="Add parsing full name and education">
+      <option name="closed" value="true" />
+      <created>1789283140095</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1789283140095</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
@@ -154,7 +160,8 @@
     <MESSAGE value="Fix requirements.txt" />
     <MESSAGE value="Update architecture to add new sources" />
     <MESSAGE value="Add parsing from napopravku.ru" />
-    <option name="LAST_COMMIT_MESSAGE" value="Add parsing from napopravku.ru" />
+    <MESSAGE value="Add parsing full name and education" />
+    <option name="LAST_COMMIT_MESSAGE" value="Add parsing full name and education" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

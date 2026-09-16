@@ -27,7 +27,10 @@ def list_doctors(speciality_slug: str, city: str) -> list[DoctorRef]:
 
             links = page.eval_on_selector_all(
                 "a[href*='/vrach/']",
-                """els => els.map(e => ({href: e.href, text: e.textContent.trim()}))"""
+                """els => els.map(e => ({
+                    href: e.href,
+                    text: e.textContent.replace(/\\s+/g, ' ').trim()
+                }))"""
             )
             page_slugs = set()
             for l in links:

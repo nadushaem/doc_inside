@@ -2,6 +2,7 @@ from sources.prodoctorov.browser import get_page
 from sources.prodoctorov.config import PAGE_LOAD_TIMEOUT_MS, BETWEEN_PAGES_DELAY_MS, MAX_PAGES_SAFETY_LIMIT
 from sources.prodoctorov.parser import parse_reviews, parse_doctor_profile
 from ids import make_review_id
+from sources.browser import goto_with_retry
 
 
 def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> tuple[list[dict], dict]:
@@ -10,7 +11,7 @@ def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> tuple[lis
     profile = {}
 
     with get_page() as page:
-        resp = page.goto(profile_url, wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+        resp = goto_with_retry(page, profile_url, PAGE_LOAD_TIMEOUT_MS)
         page.wait_for_timeout(BETWEEN_PAGES_DELAY_MS)
         if resp.status == 200:
             profile = parse_doctor_profile(page.content())
@@ -20,10 +21,10 @@ def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> tuple[lis
         page_num = 1
         while True:
             url = base_url if page_num == 1 else f"{base_url}{page_num}/"
-            resp = page.goto(url, wait_until="networkidle", timeout=PAGE_LOAD_TIMEOUT_MS)
+            resp = goto_with_retry(page, url, PAGE_LOAD_TIMEOUT_MS)
             page.wait_for_timeout(BETWEEN_PAGES_DELAY_MS)
 
-            count = page.eval_on_selector_all(".b-review-card", "els => els.length")
+            count = page.eval_on_selector_all(".b-review-card", "els => els.length") if resp.status == 200 else 0
             print(f"[DEBUG] Страница {page_num}: status={resp.status}, карточек={count}")
 
             if resp.status != 200 or count == 0:

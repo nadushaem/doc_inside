@@ -1,5 +1,6 @@
 from sources.base import DoctorRef
-from sources.napopravku.browser import get_page, goto_with_retry
+from sources.napopravku.browser import get_page
+from sources.browser import goto_with_retry
 from sources.napopravku.config import (
     BASE_DOMAIN, PAGE_LOAD_TIMEOUT_MS, BETWEEN_PAGES_DELAY_MS,
     MAX_PAGES_SAFETY_LIMIT, CITY_SLUGS, SPECIALITY_SLUGS,

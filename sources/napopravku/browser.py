@@ -16,15 +16,3 @@ def get_page():
             yield page
         finally:
             browser.close()
-
-
-def goto_with_retry(page, url: str, timeout: int):
-    last_error = None
-    for attempt in range(1, GOTO_RETRIES + 1):
-        try:
-            return page.goto(url, wait_until="domcontentloaded", timeout=timeout)
-        except PlaywrightTimeoutError as e:
-            last_error = e
-            print(f"[WARNING] napopravku: таймаут при загрузке {url} (попытка {attempt}/{GOTO_RETRIES})")
-            page.wait_for_timeout(GOTO_RETRY_DELAY_MS)
-    raise last_error

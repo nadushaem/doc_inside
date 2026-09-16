@@ -1,6 +1,7 @@
-from sources.napopravku.browser import get_page, goto_with_retry
+from sources.napopravku.browser import get_page
 from sources.napopravku.config import PAGE_LOAD_TIMEOUT_MS, BETWEEN_PAGES_DELAY_MS, MAX_SHOW_MORE_CLICKS
 from sources.napopravku.parser import parse_reviews, parse_doctor_profile
+from sources.browser import goto_with_retry
 from ids import make_review_id
 
 SHOW_MORE_SELECTOR = ".doctor-review__btn-wrapper button.doctor-review__btn"
