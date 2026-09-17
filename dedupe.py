@@ -1,6 +1,6 @@
-# dedupe.py
 import re
 from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from itertools import combinations
 
@@ -9,58 +9,85 @@ from storage import load_json, save_json, json_exists
 INDEX_PATH = "data/processed/doctors/index.json"
 MATCHES_PATH = "data/processed/doctors/matches.json"
 MANUAL_DECISIONS_PATH = "data/processed/doctors/manual_decisions.json"
-
-UNI_SIMILARITY_THRESHOLD = 0.8
-SURNAME_TYPO_THRESHOLD = 0.85
-
-UNI_STOPWORDS = {
-    "фгбоу", "гбоу", "гоу", "фгоу", "во", "впо", "федеральное", "государственное",
-    "бюджетное", "образовательное", "учреждение", "высшего", "профессионального",
-    "образования", "минздрава", "минздравсоцразвития", "россии", "рф",
-    "министерства", "здравоохранения", "российской", "федерации", "имени", "им",
-}
-
-# латинские буквы, которые выглядят как кириллические (после lower())
-HOMOGLYPHS = str.maketrans("aeopcxykmthb", "аеорсхукмтнв")
-
-# варианты, которые не ловит общее правило в canon()
-NAME_ALIASES = {
-    "ильична": "ильинична",
-    "кузьмична": "кузьминична",
-    "фомична": "фоминична",
-    "лукична": "лукинична",
-}
-
-PATRONYMIC_RE = re.compile(r"(вич|вна|чна|оглы|кызы|улы)$")
-FEMALE_SURNAME_RE = re.compile(r"(ова|ева|ина|ына|ая|айте|ене|уте)$")
-
-PATRONYMIC_TYPO_THRESHOLD = 0.8
 UNPARSED_PATH = "data/processed/doctors/unparsed_names.json"
 
-# порядок вывода на ручную проверку
-KIND_ORDER = ["exact", "double_surname", "maiden_bracket", "typo", "patronymic_typo", "surname_change"]
-KIND_TITLES = {
+# --- пороги скоринга ---
+AUTO_THRESHOLD_EXACT = 3.5   # полное ФИО + хоть что-то не противоречит
+AUTO_THRESHOLD_FUZZY = 5.0   # нечёткое ФИО + совпали и год, и вуз
+REVIEW_THRESHOLD = 1.5       # ниже — считаем тёзками и не показываем
+
+SURNAME_TYPO_THRESHOLD = 0.85
+PATRONYMIC_TYPO_STRONG = 0.8
+PATRONYMIC_TYPO_WEAK = 0.65
+NAME_VARIANT_THRESHOLD = 0.6
+SLUG_MATCH_THRESHOLD = 0.85
+SLUG_OWN_THRESHOLD = 0.8      # если slug непохож на свою фамилию — это старая фамилия
+UNI_FUZZY_THRESHOLD = 0.8
+MAX_BLOCK_SIZE = 60
+
+KIND_BASE_TITLES = {
     "exact": "полное совпадение ФИО",
     "double_surname": "двойная фамилия",
     "maiden_bracket": "девичья фамилия в скобках",
-    "typo": "возможная опечатка в фамилии",
-    "patronymic_typo": "возможная опечатка в отчестве",
+    "slug_surname": "старая фамилия в slug",
+    "surname_typo": "опечатка в фамилии",
+    "patronymic_typo": "опечатка в отчестве",
+    "missing_patronymic": "отчество указано только на одном сайте",
+    "name_variant": "разное написание имени",
     "surname_change": "возможная смена фамилии",
+}
+KIND_ORDER = list(KIND_BASE_TITLES)
+
+
+def sim(a: str | None, b: str | None) -> float:
+    return SequenceMatcher(None, a, b).ratio() if a and b else 0.0
+
+
+# ======================================================================
+# ИМЕНА
+# ======================================================================
+
+HOMOGLYPHS = str.maketrans("aeopcxykmthb", "аеорсхукмтнв")
+TURKIC_MARKERS = {"кызы", "гызы", "оглы", "улы", "уулу"}
+PATRONYMIC_SUFFIXES = ("инична", "овна", "евна", "ична", "вна", "ович", "евич", "вич")
+PATRONYMIC_RE = re.compile(r"(вич|вна|чна)$")
+FEMALE_SURNAME_RE = re.compile(r"(ова|ева|ина|ына|ая|айте|ене|уте)$")
+
+TRANSLIT = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ж": "zh", "з": "z",
+    "и": "i", "й": "y", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p",
+    "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f", "х": "h", "ц": "c", "ч": "ch",
+    "ш": "sh", "щ": "sh", "ъ": "", "ы": "y", "ь": "", "ю": "yu", "я": "ya",
 }
 
 
-# ---------- имена ----------
+def translit(s: str) -> str:
+    return "".join(TRANSLIT.get(c, c) for c in s)
+
 
 def canon(token: str) -> str:
-    """Ключ для сравнения: Наталья/Наталия, Юрьевна/Юриевна и т.п. дают одно и то же."""
-    token = NAME_ALIASES.get(token, token)
-    token = token.replace("ь", "").replace("ъ", "")
-    token = re.sub(r"и(?=[аеиоуыэюя])", "", token)
-    return token
+    """Ключ сравнения: Наталья/Наталия, Юля/Юлия, Брусницина/Брусницына дают одно и то же."""
+    token = token.replace("ь", "").replace("ъ", "").replace("ы", "и")
+    return re.sub(r"и(?=[аеиоуэюя])", "", token)
+
+
+def patronymic_root(patr: str) -> str:
+    """Юрьевна/Юриевна -> юр, Рафиговна/Рафиг кызы -> рафиг, Ильинична/Ильична -> ил."""
+    if not patr:
+        return ""
+    words = patr.split()
+    if len(words) > 1 and words[-1] in TURKIC_MARKERS:
+        root = words[0]
+    else:
+        root = patr
+        for suf in PATRONYMIC_SUFFIXES:
+            if root.endswith(suf) and len(root) > len(suf) + 1:
+                root = root[:-len(suf)]
+                break
+    return canon(root).rstrip("и")
 
 
 def _clean(s: str) -> str:
-    s = s.lower().replace("ё", "е").translate(HOMOGLYPHS)
     s = re.sub(r"[^а-я\s-]", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
@@ -69,259 +96,469 @@ def _parts(tokens: list[str]) -> set[str]:
     return {canon(p) for t in tokens for p in t.split("-") if p}
 
 
-def parse_full_name(raw: str | None) -> dict | None:
+@dataclass
+class Name:
+    surname_key: str
+    surname_parts: set
+    maiden_parts: set
+    name: str
+    patronymic: str
+    patr_root: str
+    full_key: str
+    is_female: bool
+    latin: str
+    alt_latin: dict = field(default_factory=dict)  # латинская фамилия -> вес сигнала
+
+
+def parse_full_name(raw: str | None) -> Name | None:
     if not raw:
         return None
-    lowered = raw.lower().replace("ё", "е").translate(HOMOGLYPHS)
-    maiden_raw = " ".join(re.findall(r"\((.*?)\)", lowered))
-    tokens = _clean(re.sub(r"\(.*?\)", " ", lowered)).split()
+    low = raw.lower().translate(HOMOGLYPHS).replace("ё", "е").replace("э", "е")
+    maiden_tokens = _clean(" ".join(re.findall(r"\((.*?)\)", low))).split()
+
+    tokens: list[str] = []
+    for t in _clean(re.sub(r"\(.*?\)", " ", low)).split():
+        if t in TURKIC_MARKERS and tokens:
+            tokens[-1] += " " + t          # «Рафиг кызы» — одно отчество
+        else:
+            tokens.append(t)
     if len(tokens) < 2:
         return None
 
-    patr_idx = next((i for i, t in enumerate(tokens) if i >= 1 and PATRONYMIC_RE.search(t)), None)
-    patronymic_guessed = False
-
-    if patr_idx is None:
+    idx = next((i for i, t in enumerate(tokens)
+                if i >= 1 and (" " in t or PATRONYMIC_RE.search(t))), None)
+    guessed = False
+    if idx is None:
         if len(tokens) == 2:
-            surname_tokens, name, patronymic = [tokens[0]], tokens[1], ""
-        elif len(tokens) == 3:
-            # нестандартное отчество (Вито, Андраники, Жамыбекова) или опечатка:
-            # берём основной формат сайтов «Фамилия Имя Отчество»
-            surname_tokens, name, patronymic = [tokens[0]], tokens[1], tokens[2]
-            patronymic_guessed = True
+            sur, name, patr = tokens[:1], tokens[1], ""
+        elif len(tokens) == 3:             # «Яблонскайте Оксана Вито»
+            sur, name, patr, guessed = tokens[:1], tokens[1], tokens[2], True
         else:
             return None
-    elif patr_idx >= 2:                       # Фамилия Имя Отчество [мусор]
-        surname_tokens, name, patronymic = tokens[:patr_idx - 1], tokens[patr_idx - 1], tokens[patr_idx]
-    else:                                     # Имя Отчество Фамилия
-        surname_tokens, name, patronymic = tokens[2:3], tokens[0], tokens[1]
-
-    if not surname_tokens:
+    elif idx >= 2:                         # Фамилия Имя Отчество [мусор]
+        sur, name, patr = tokens[:idx - 1], tokens[idx - 1], tokens[idx]
+    else:                                  # Имя Отчество Фамилия
+        sur, name, patr = tokens[2:3], tokens[0], tokens[1]
+    if not sur:
         return None
 
-    surname_key = " ".join(canon(t) for t in surname_tokens)
-    name_c, patr_c = canon(name), canon(patronymic)
-
-    if patronymic_guessed:
-        is_female = bool(FEMALE_SURNAME_RE.search(surname_tokens[-1])) or patronymic.endswith("а")
+    if guessed or not patr:
+        is_female = bool(FEMALE_SURNAME_RE.search(sur[-1])) or name.endswith(("а", "я"))
     else:
-        is_female = patronymic.endswith(("на", "кызы"))
+        is_female = patr.endswith(("на", "кызы", "гызы"))
 
-    return {
-        "surname_key": surname_key,
-        "surname_parts": _parts(surname_tokens),
-        "maiden_parts": _parts(_clean(maiden_raw).split()) if maiden_raw else set(),
-        "name_key": f"{name_c} {patr_c}".strip(),
-        "surname_name_key": f"{surname_key} {name_c}",
-        "patronymic_key": patr_c,
-        "full_key": f"{surname_key} {name_c} {patr_c}".strip(),
-        "has_patronymic": bool(patronymic),
-        "patronymic_guessed": patronymic_guessed,
-        "is_female": is_female,
-    }
+    surname_key = " ".join(canon(t) for t in sur)
+    root = patronymic_root(patr)
+    name_c = canon(name)
+    return Name(
+        surname_key=surname_key,
+        surname_parts=_parts(sur),
+        maiden_parts=_parts(maiden_tokens),
+        name=name_c,
+        patronymic=canon(patr.replace(" ", "")),
+        patr_root=root,
+        full_key=f"{surname_key}|{name_c}|{root}",
+        is_female=is_female,
+        latin=translit("-".join(sur)),
+        alt_latin={translit(m): 1.5 for m in maiden_tokens},
+    )
 
 
-# ---------- образование ----------
+def attach_slug_surname(name: Name, info: dict) -> None:
+    """Если фамилия в slug не похожа на текущую — это, скорее всего, прежняя фамилия."""
+    slug = info.get("profile_url", "").rstrip("/").rsplit("/", 1)[-1]
+    if info["source"] == "prodoctorov":
+        slug, weight = re.sub(r"^\d+-", "", slug), 1.5
+    else:
+        # napopravku переиспользует профили, поэтому сигнал слабее
+        slug, weight = re.sub(r"^\d+", "", slug).split("-")[0], 0.5
+    if slug and sim(slug, name.latin) < SLUG_OWN_THRESHOLD:
+        name.alt_latin[slug] = max(weight, name.alt_latin.get(slug, 0))
 
-def get_education(info: dict) -> tuple[str | None, int | None]:
-    uni, year = info.get("university"), info.get("graduation_year")
-    if uni and not year:  # "Уральская ... академия, 2006" / "... (2006)"
-        m = re.search(r"[,\s(]+(\d{4})\)?\s*$", uni)
+
+# ======================================================================
+# ОБРАЗОВАНИЕ
+# ======================================================================
+
+UNI_STOPWORDS = {
+    "фгбоу", "гбоу", "гоу", "фгоу", "во", "впо", "федеральное", "государственное",
+    "бюджетное", "образовательное", "учреждение", "высшего", "профессионального",
+    "образования", "минздрава", "минздравсоцразвития", "россии", "рф", "мз",
+    "министерства", "здравоохранения", "российской", "федерации", "имени", "им",
+    "государственный", "государственная", "медицинский", "медицинская",
+    "университет", "академия", "институт", "екатеринбург", "г", "по", "специальности",
+}
+COURSE_RE = re.compile(r"повышени\w* квалификац|переподготовк|сестринское дело в косметолог"
+                       r"|мезотерап|интенсив|дополнительное образование")
+COLLEGE_RE = re.compile(r"колледж|училищ|техникум|школа красоты|институт (эстетики|красоты)")
+
+# порядок важен: более специфичные правила выше
+UNI_RULES = [
+    ("ugmado", r"уральск\w* государственн\w* медицинск\w* академи\w* дополнительн"),
+    ("usmu", r"уральск\w* (государственн\w* )?медицинск|свердловск\w* государственн\w*.*медицинск\w* институт"
+             r"|\bугм[ау]\b"),
+    ("tyumen", r"тюменск\w*.*медицинск"),
+    ("perm", r"пермск\w*.*медицинск|\bпгму\b"),
+    ("susmu", r"южно уральск\w*.*медицинск|челябинск\w*.*медицинск|\bюугму\b"),
+    ("omsk", r"омск\w*.*медицинск|\bомгму\b"),
+    ("orenburg", r"оренбургск\w*.*медицинск"),
+    ("izhevsk", r"ижевск\w*.*медицинск"),
+    ("bashkir", r"башкирск\w*.*медицинск"),
+    ("kirov", r"кировск\w*.*медицинск"),
+    ("karaganda", r"караганд"),
+    ("kemerovo", r"кемеровск\w*.*медицинск"),
+    ("krsu", r"(кыргызско|киргизско) российск\w* славянск"),
+    ("kgma", r"ахунбаева|кыргызск\w* государственн\w* медицинск"),
+    ("tajik", r"таджикск\w*.*медицинск|абуали"),
+    ("sibgmu", r"сибирск\w*.*медицинск|\bсибгму\b"),
+    ("kazan", r"казанск\w*.*медицинск"),
+    ("rnimu", r"пирогова|\bрниму\b"),
+    ("sechenov", r"сеченова"),
+    ("tashkent_ped", r"ташкентск\w* педиатрическ"),
+    ("tashkent", r"ташкентск"),
+    ("yerevan", r"ереванск\w*.*медицинск|гераци"),
+    ("amur", r"амурск\w*.*медицинск"),
+    ("astrakhan", r"астраханск\w*.*медицинск"),
+    ("pacific", r"тихоокеанск\w*.*медицинск"),
+    ("dagestan", r"дагестанск\w*.*медицинск"),
+    ("rostov", r"ростовск\w*.*медицинск"),
+    ("saratov", r"саратовск\w*.*медицинск"),
+    ("samara", r"самарск\w*.*медицинск"),
+    ("krasnoyarsk", r"красноярск\w*.*медицинск"),
+    ("chita", r"читинск\w*.*медицинск"),
+    ("volgograd", r"волгоградск\w*.*медицинск"),
+    ("lugansk", r"луганск\w*.*медицинск"),
+]
+YEAR_RE = re.compile(r"(?<!\d)(19[5-9]\d|20[0-3]\d)(?!\d)")
+
+
+@dataclass
+class Education:
+    uni_id: str | None = None
+    uni_norm: str | None = None
+    year: int | None = None
+    level: str | None = None  # "higher" / "college"
+
+
+def parse_education(info: dict) -> Education:
+    raw, year = info.get("university"), info.get("graduation_year")
+    if not raw:
+        return Education(year=year)
+
+    text = raw.lower().replace("ё", "е")
+    unreliable = bool(COURSE_RE.search(text))
+    if not year and not unreliable:
+        m = YEAR_RE.search(text)
         if m:
-            year, uni = int(m.group(1)), uni[:m.start()].strip()
-    return uni, year
+            year = int(m.group(1))
+
+    text = re.sub(r"\(.*?\)|«.*?»", " ", text)
+    text = re.sub(r"диплом с отличием|лечебн\w* дел\w*|педиатри\w*|\d+", " ", text)
+    text = re.sub(r"[^а-яa-z\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if COLLEGE_RE.search(text):
+        level, uni_id = "college", None
+    else:
+        uni_id = next((uid for uid, rx in UNI_RULES if re.search(rx, text)), None)
+        level = "higher" if uni_id or re.search(r"университет|академи|институт", text) else None
+
+    norm = " ".join(t for t in text.split() if t not in UNI_STOPWORDS) or None
+    if unreliable and uni_id is None:
+        norm = None  # в поле описание курсов, а не вуза
+    return Education(uni_id=uni_id, uni_norm=norm, year=year, level=level)
 
 
-def normalize_university(uni: str | None) -> str | None:
-    if not uni:
+# ======================================================================
+# КЛАССИФИКАЦИЯ И СКОРИНГ ПАР
+# ======================================================================
+
+@dataclass
+class Person:
+    key: str
+    info: dict
+    name: Name
+    edu: Education
+
+
+def slug_signal(pa: Name, pb: Name) -> float:
+    best = 0.0
+    for alt, w in pa.alt_latin.items():
+        if max(sim(alt, pb.latin), *(sim(alt, x) for x in pb.alt_latin), 0) >= SLUG_MATCH_THRESHOLD:
+            best = max(best, w)
+    for alt, w in pb.alt_latin.items():
+        if sim(alt, pa.latin) >= SLUG_MATCH_THRESHOLD:
+            best = max(best, w)
+    return best
+
+
+def classify(pa: Name, pb: Name) -> tuple[str, float] | None:
+    """Тип совпадения ФИО и базовый балл. None — точно разные люди."""
+    if pa.full_key == pb.full_key:
+        return "exact", 3.0
+
+    same_name = pa.name == pb.name
+    same_patr = bool(pa.patr_root) and pa.patr_root == pb.patr_root
+    same_surname = pa.surname_key == pb.surname_key
+
+    if same_name and same_patr:
+        if pa.surname_parts & pb.surname_parts:
+            return "double_surname", 1.5
+        if (pa.maiden_parts & pb.surname_parts or pb.maiden_parts & pa.surname_parts
+                or pa.maiden_parts & pb.maiden_parts):
+            return "maiden_bracket", 1.5
+        w = slug_signal(pa, pb)
+        if w:
+            return "slug_surname", w
+        if sim(pa.surname_key, pb.surname_key) >= SURNAME_TYPO_THRESHOLD:
+            return "surname_typo", 1.5
+        if pa.is_female and pb.is_female:
+            return "surname_change", 0.5
         return None
-    uni = uni.lower().replace("ё", "е")
-    uni = re.sub(r"[^а-яa-z0-9\s]", " ", uni)
-    tokens = [t for t in uni.split() if t not in UNI_STOPWORDS]
-    return " ".join(tokens) or None
 
-
-def university_similarity(a: str | None, b: str | None) -> float | None:
-    a, b = normalize_university(a), normalize_university(b)
-    if not a or not b:
+    if same_surname and same_name:
+        if not pa.patronymic or not pb.patronymic:
+            return "missing_patronymic", 1.0
+        s = max(sim(pa.patronymic, pb.patronymic), sim(pa.patr_root, pb.patr_root))
+        if s >= PATRONYMIC_TYPO_STRONG:
+            return "patronymic_typo", 1.5
+        if s >= PATRONYMIC_TYPO_WEAK:
+            return "patronymic_typo", 0.5
         return None
-    return SequenceMatcher(None, a, b).ratio()
+
+    if same_surname and same_patr:
+        return "name_variant", 1.5 if sim(pa.name, pb.name) >= NAME_VARIANT_THRESHOLD else 0.5
+
+    return None
 
 
-def compare_education(a: dict, b: dict) -> tuple[bool, str]:
-    uni_a, year_a = get_education(a)
-    uni_b, year_b = get_education(b)
-    if year_a and year_b and year_a != year_b:
-        return False, f"разные годы выпуска: {year_a} vs {year_b}"
+def score_pair(kind: str, base: float, a: Person, b: Person, namesakes: bool) -> tuple[float, list[str], bool]:
+    score, notes, veto = base, [f"{KIND_BASE_TITLES[kind]} (+{base})"], False
+    ea, eb = a.edu, b.edu
 
-    sim = university_similarity(uni_a, uni_b)
-    if sim is None:
-        return False, "образование не указано на одном из сайтов"
-    if sim >= UNI_SIMILARITY_THRESHOLD:
-        return True, f"вуз совпал (сходство {sim:.2f})"
-    return False, f"вузы различаются (сходство {sim:.2f})"
+    if ea.year and eb.year:
+        if ea.year == eb.year:
+            score += 2
+            notes.append(f"год выпуска {ea.year} (+2)")
+        elif abs(ea.year - eb.year) == 1:
+            notes.append(f"годы {ea.year}/{eb.year} отличаются на 1 (0)")
+        else:
+            score -= 5
+            veto = True
+            notes.append(f"разные годы {ea.year}/{eb.year} (-5)")
 
+    if ea.uni_id and eb.uni_id:
+        if ea.uni_id == eb.uni_id:
+            score += 1.5
+            notes.append(f"вуз {ea.uni_id} (+1.5)")
+        else:
+            score -= 2
+            notes.append(f"разные вузы {ea.uni_id}/{eb.uni_id} (-2)")
+    elif ea.uni_norm and eb.uni_norm:
+        s = sim(ea.uni_norm, eb.uni_norm)
+        delta = 1 if s >= UNI_FUZZY_THRESHOLD else -1
+        score += delta
+        notes.append(f"вузы похожи на {s:.2f} ({delta:+})")
 
-def classify_surname_mismatch(pa: dict, pb: dict, a: dict, b: dict) -> tuple[str | None, str | None]:
-    """Имя+отчество совпали, фамилии разные. Возвращает (kind, reason) или (None, None), если это просто тёзки."""
-    if pa["surname_parts"] & pb["surname_parts"]:
-        return "double_surname", "у фамилий есть общая часть"
-    if pa["maiden_parts"] & pb["surname_parts"] or pb["maiden_parts"] & pa["surname_parts"]:
-        return "maiden_bracket", "девичья фамилия совпала с фамилией на другом сайте"
+    if ea.level and eb.level and ea.level != eb.level:
+        score -= 1
+        notes.append("вуз vs колледж (-1)")
 
-    sim = SequenceMatcher(None, pa["surname_key"], pb["surname_key"]).ratio()
-    if sim >= SURNAME_TYPO_THRESHOLD:
-        return "typo", f"фамилии похожи (сходство {sim:.2f})"
+    if set(a.info["specialities"]) & set(b.info["specialities"]):
+        score += 0.5
+        notes.append("общая специальность (+0.5)")
+    else:
+        score -= 0.5
+        notes.append("нет общей специальности (-0.5)")
 
-    # смена фамилии: без сильных сигналов это просто тёзки по имени-отчеству
-    if not (pa["is_female"] and pb["is_female"]):
-        return None, None
-    uni_a, year_a = get_education(a)
-    uni_b, year_b = get_education(b)
-    if not (year_a and year_b and year_a == year_b):
-        return None, None
-    uni_sim = university_similarity(uni_a, uni_b)
-    if uni_sim is not None and uni_sim < UNI_SIMILARITY_THRESHOLD:
-        return None, None
-    if not set(a["specialities"]) & set(b["specialities"]):
-        return None, None
-    return "surname_change", f"разные фамилии, но совпали год выпуска ({year_a}) и специальность"
+    if namesakes:
+        score -= 2
+        notes.append("есть тёзки в одном источнике (-2)")
 
+    return score, notes, veto
 
-# ---------- пары ----------
 
 def pair_id(key_a: str, key_b: str) -> str:
     return "|".join(sorted([key_a, key_b]))
 
 
-def make_pair(key_a, a, key_b, b, reason, kind) -> dict:
-    def doc(key, info):
-        uni, year = get_education(info)
-        return {"key": key, "source": info["source"], "profile_url": info["profile_url"],
-                "full_name": info.get("full_name"), "university": uni, "graduation_year": year}
+def make_pair(a: Person, b: Person, kind: str, score: float, notes: list[str]) -> dict:
+    def doc(p: Person):
+        return {"key": p.key, "source": p.info["source"], "profile_url": p.info["profile_url"],
+                "full_name": p.info.get("full_name"), "university": p.info.get("university"),
+                "university_id": p.edu.uni_id, "graduation_year": p.edu.year,
+                "specialities": p.info["specialities"]}
+    return {"pair_id": pair_id(a.key, b.key), "kind": kind, "score": round(score, 2),
+            "same_source": a.info["source"] == b.info["source"],
+            "reason": "; ".join(notes), "doctors": [doc(a), doc(b)]}
 
-    return {
-        "pair_id": pair_id(key_a, key_b),
-        "kind": kind,
-        "doctors": [doc(key_a, a), doc(key_b, b)],
-        "reason": reason,
-    }
 
+# ======================================================================
+# КЛАСТЕРЫ
+# ======================================================================
+
+class DSU:
+    def __init__(self):
+        self.parent = {}
+
+    def find(self, x):
+        self.parent.setdefault(x, x)
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]
+            x = self.parent[x]
+        return x
+
+    def union(self, a, b):
+        self.parent[self.find(a)] = self.find(b)
+
+
+def build_clusters(buckets: dict, index: dict) -> list[dict]:
+    dsu = DSU()
+    confirmed = set()
+    for bucket in ("auto", "manual_confirmed"):
+        for p in buckets[bucket]:
+            a, b = (d["key"] for d in p["doctors"])
+            dsu.union(a, b)
+            if bucket == "manual_confirmed":
+                confirmed.add(p["pair_id"])
+
+    groups = defaultdict(set)
+    for k in dsu.parent:
+        groups[dsu.find(k)].add(k)
+
+    rejected = {p["pair_id"] for p in buckets["manual_rejected"]}
+    clusters = []
+    for i, keys in enumerate(sorted(groups.values(), key=lambda s: sorted(s)), 1):
+        problems = []
+        per_source = Counter(index[k]["source"] for k in keys)
+        for a, b in combinations(sorted(keys), 2):
+            pid = pair_id(a, b)
+            if pid in rejected:
+                problems.append(f"пара {pid} отклонена вручную, но попала в кластер транзитивно")
+            elif index[a]["source"] == index[b]["source"] and pid not in confirmed:
+                problems.append(f"два профиля одного источника без подтверждения: {pid}")
+        clusters.append({
+            "cluster_id": f"cluster_{i:05d}",
+            "keys": sorted(keys),
+            "sources": dict(per_source),
+            "needs_review": bool(problems),
+            "problems": problems,
+        })
+    return clusters
+
+
+# ======================================================================
+# MAIN
+# ======================================================================
 
 def main():
     index = load_json(INDEX_PATH)
     decisions = load_json(MANUAL_DECISIONS_PATH) if json_exists(MANUAL_DECISIONS_PATH) else {}
 
-    parsed, unparsed = {}, []
+    persons, unparsed = {}, []
     for key, info in index.items():
-        p = parse_full_name(info.get("full_name"))
-        if p is None:
-            unparsed.append((key, info.get("full_name")))
-        else:
-            parsed[key] = p
+        name = parse_full_name(info.get("full_name"))
+        if name is None:
+            unparsed.append(key)
+            continue
+        attach_slug_surname(name, info)
+        persons[key] = Person(key, info, name, parse_education(info))
 
-    exact_groups, name_groups, surname_name_groups = defaultdict(list), defaultdict(list), defaultdict(list)
-    for key, p in parsed.items():
-        city = index[key].get("city")
-        exact_groups[(p["full_key"], city)].append(key)
-        if p["has_patronymic"]:
-            name_groups[(p["name_key"], city)].append(key)
-            surname_name_groups[(p["surname_name_key"], city)].append(key)
+    # --- блокировка: сравниваем только внутри общих ключей ---
+    blocks = defaultdict(list)
+    fullname_counts = Counter()
+    for key, p in persons.items():
+        city, n = p.info.get("city"), p.name
+        fullname_counts[(city, n.full_key, p.info["source"])] += 1
+        blocks[("full", city, n.full_key)].append(key)
+        blocks[("sur_name", city, n.surname_key, n.name)].append(key)
+        if n.patr_root:
+            blocks[("name_patr", city, n.name, n.patr_root)].append(key)
+            blocks[("sur_patr", city, n.surname_key, n.patr_root)].append(key)
+
+    candidates = set()
+    for bkey, keys in blocks.items():
+        if len(keys) > MAX_BLOCK_SIZE:
+            print(f"[WARNING] блок {bkey} слишком большой ({len(keys)}), пропускаю")
+            continue
+        candidates.update(tuple(sorted(pair)) for pair in combinations(keys, 2))
 
     buckets = {"auto": [], "manual_confirmed": [], "manual_rejected": [], "pending": []}
+    skipped = Counter()
 
-    def route(key_a, key_b, is_match, reason, kind):
-        pair = make_pair(key_a, index[key_a], key_b, index[key_b], reason, kind)
+    for ka, kb in sorted(candidates):
+        a, b = persons[ka], persons[kb]
+        cls = classify(a.name, b.name)
+        if cls is None:
+            skipped["разные ФИО"] += 1
+            continue
+        kind, base = cls
+        city = a.info.get("city")
+        namesakes = kind == "exact" and any(
+            fullname_counts[(city, a.name.full_key, src)] > 1
+            for src in (a.info["source"], b.info["source"])
+        )
+        score, notes, veto = score_pair(kind, base, a, b, namesakes)
+        pair = make_pair(a, b, kind, score, notes)
+        same_source = pair["same_source"]
+
         decision = decisions.get(pair["pair_id"])
         if decision is True:
             buckets["manual_confirmed"].append(pair)
-        elif decision is False:
-            buckets["manual_rejected"].append(pair)
-        elif is_match:
-            buckets["auto"].append(pair)
-        else:
-            buckets["pending"].append(pair)
-
-    # 1. полное совпадение ФИО
-    exact_matched = set()
-    for keys in exact_groups.values():
-        per_source = Counter(index[k]["source"] for k in keys)
-        if len(per_source) < 2:
             continue
-        has_namesakes = any(c > 1 for c in per_source.values())
-        for a, b in combinations(keys, 2):
-            if index[a]["source"] == index[b]["source"]:
-                continue
-            is_match, reason = compare_education(index[a], index[b])
-            if has_namesakes:
-                is_match, reason = False, f"несколько тёзок; {reason}"
-            exact_matched.update((a, b))
-            route(a, b, is_match, reason, "exact")
+        if decision is False:
+            buckets["manual_rejected"].append(pair)
+            continue
 
-    # 2. имя+отчество совпали, фамилия разная — только ручная проверка
-    skipped_namesakes = 0
-    for keys in name_groups.values():
-        for a, b in combinations(keys, 2):
-            A, B = index[a], index[b]
-            if A["source"] == B["source"] or a in exact_matched or b in exact_matched:
-                continue
-            if parsed[a]["full_key"] == parsed[b]["full_key"]:
-                continue
-            kind, reason = classify_surname_mismatch(parsed[a], parsed[b], A, B)
-            if kind is None:
-                skipped_namesakes += 1
-                continue
-            route(a, b, False, reason, kind)
+        threshold = AUTO_THRESHOLD_EXACT if kind == "exact" else AUTO_THRESHOLD_FUZZY
+        if not veto and not same_source and score >= threshold:
+            buckets["auto"].append(pair)
+        elif score >= REVIEW_THRESHOLD:
+            buckets["pending"].append(pair)
+        else:
+            skipped[f"низкий балл ({kind})"] += 1
 
-    # 3. фамилия+имя совпали, отчества похожи (опечатка) — только ручная проверка
-    for keys in surname_name_groups.values():
-        for a, b in combinations(keys, 2):
-            A, B = index[a], index[b]
-            if A["source"] == B["source"] or a in exact_matched or b in exact_matched:
-                continue
-            pa, pb = parsed[a], parsed[b]
-            if pa["full_key"] == pb["full_key"]:
-                continue
-            sim = SequenceMatcher(None, pa["patronymic_key"], pb["patronymic_key"]).ratio()
-            if sim >= PATRONYMIC_TYPO_THRESHOLD:
-                route(a, b, False, f"отчества похожи (сходство {sim:.2f})", "patronymic_typo")
-
-    buckets["pending"].sort(key=lambda p: (KIND_ORDER.index(p["kind"]), p["doctors"][0]["full_name"] or ""))
-    save_json(buckets, MATCHES_PATH)
+    buckets["pending"].sort(key=lambda p: (KIND_ORDER.index(p["kind"]), -p["score"]))
+    clusters = build_clusters(buckets, index)
+    save_json({**buckets, "clusters": clusters}, MATCHES_PATH)
 
     # ---------- диагностика ----------
-    print(f"[DEBUG] Врачей в индексе: {len(index)}, не удалось разобрать ФИО: {len(unparsed)}")
-    print(f"[DEBUG] Автосовпадений: {len(buckets['auto'])}, подтверждено вручную: {len(buckets['manual_confirmed'])}, "
+    print(f"[DEBUG] Врачей в индексе: {len(index)}, ФИО не разобрано: {len(unparsed)}, "
+          f"пар-кандидатов: {len(candidates)}")
+    print(f"[DEBUG] Автосовпадений: {len(buckets['auto'])}, подтверждено: {len(buckets['manual_confirmed'])}, "
           f"отклонено: {len(buckets['manual_rejected'])}, ждут проверки: {len(buckets['pending'])}")
-    print(f"[DEBUG] Пар «то же имя-отчество, другая фамилия» без доп. сигналов (пропущены): {skipped_namesakes}")
+    print(f"[DEBUG] Отброшено: {dict(skipped)}")
 
-    pending_by_kind = Counter(p["kind"] for p in buckets["pending"])
-    for kind in KIND_ORDER:
-        if pending_by_kind[kind]:
-            print(f"    {KIND_TITLES[kind]}: {pending_by_kind[kind]}")
+    for title, bucket in (("auto", buckets["auto"]), ("pending", buckets["pending"])):
+        by_kind = Counter(p["kind"] for p in bucket)
+        print(f"    {title}: " + ", ".join(f"{KIND_BASE_TITLES[k]}={by_kind[k]}" for k in KIND_ORDER if by_kind[k]))
 
-    matched_keys = {d["key"] for b in ("auto", "manual_confirmed") for p in buckets[b] for d in p["doctors"]}
-    pending_keys = {d["key"] for p in buckets["pending"] for d in p["doctors"]}
-    print("\n[DEBUG] По источникам:")
-    for source, total in Counter(i["source"] for i in index.values()).most_common():
-        keys = {k for k, i in index.items() if i["source"] == source}
-        print(f"    {source:<12} всего {total:>5}, склеено {len(keys & matched_keys):>5}, "
-              f"на проверке {len(keys & pending_keys):>5}")
+    in_clusters = sum(len(c["keys"]) for c in clusters)
+    print(f"\n[DEBUG] Кластеров: {len(clusters)} (записей в них {in_clusters}, "
+          f"лишних записей {in_clusters - len(clusters)}); требуют проверки: "
+          f"{sum(c['needs_review'] for c in clusters)}")
+    for c in clusters:
+        if c["needs_review"]:
+            names = [index[k].get("full_name") for k in c["keys"]]
+            print(f"    {c['cluster_id']}: {names}")
+            for pr in c["problems"]:
+                print(f"        ! {pr}")
 
     if unparsed:
-        save_json([{"key": k, "full_name": n, "profile_url": index[k]["profile_url"]} for k, n in unparsed],
-                  UNPARSED_PATH)
-        print(f"\n[DEBUG] Не удалось разобрать ФИО: {len(unparsed)}, список в {UNPARSED_PATH}")
-        for key, name in unparsed[:20]:
-            print(f"    {key}: {name!r}  {index[key]['profile_url']}")
+        save_json([{"key": k, "full_name": index[k].get("full_name"),
+                    "profile_url": index[k]["profile_url"]} for k in unparsed], UNPARSED_PATH)
+        print(f"\n[DEBUG] Не разобрано ФИО: {len(unparsed)}, список в {UNPARSED_PATH}")
 
     if buckets["pending"]:
         print("\n=== Ручная проверка ===")
         print(f"Решения вписывай в {MANUAL_DECISIONS_PATH} в виде {{\"pair_id\": true/false}}\n")
     for i, pair in enumerate(buckets["pending"], 1):
-        print(f"[{i}/{len(buckets['pending'])}] [{KIND_TITLES[pair['kind']]}] {pair['reason']}")
+        mark = " [ОДИН ИСТОЧНИК]" if pair["same_source"] else ""
+        print(f"[{i}/{len(buckets['pending'])}] [{KIND_BASE_TITLES[pair['kind']]}]{mark} "
+              f"балл {pair['score']}: {pair['reason']}")
         for d in pair["doctors"]:
-            print(f"    {d['source']:<12} {d['full_name']}  {d['profile_url']}")
+            print(f"    {d['source']:<12} {d['full_name']} | {d['university_id'] or d['university']} "
+                  f"| {d['graduation_year']}  {d['profile_url']}")
         print(f"    pair_id: {pair['pair_id']}\n")
 
 
