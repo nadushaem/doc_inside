@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+
 from bs4 import BeautifulSoup
 
 from sources.prodoctorov.config import MONTHS_RU
@@ -52,15 +53,19 @@ def parse_reviews(html: str, doctor_url: str) -> list[dict]:
 
         date_raw = date_tag.get_text(strip=True) if date_tag else None
 
-        reviews.append({
-            "text": text,
-            "source": SOURCE_NAME,
-            "doctor_url": doctor_url,
-            "date_raw": date_raw,
-            "date_iso": parse_review_date(date_raw),
-            "rating": None,  # на prodoctorov числового рейтинга в HTML нет
-            "site_sentiment": "positive" if is_positive else ("negative" if is_negative else "neutral"),
-        })
+        reviews.append(
+            {
+                "text": text,
+                "source": SOURCE_NAME,
+                "doctor_url": doctor_url,
+                "date_raw": date_raw,
+                "date_iso": parse_review_date(date_raw),
+                "rating": None,  # на prodoctorov числового рейтинга в HTML нет
+                "site_sentiment": "positive"
+                if is_positive
+                else ("negative" if is_negative else "neutral"),
+            }
+        )
 
     return reviews
 

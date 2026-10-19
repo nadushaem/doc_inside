@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+
 from bs4 import BeautifulSoup
 
 SOURCE_NAME = "napopravku"
@@ -43,18 +44,22 @@ def parse_reviews(html: str, doctor_url: str) -> list[dict]:
         if not text:
             continue
 
-        date_tag = card.select_one(".review__header .review__rating > .review-interaction__description")
+        date_tag = card.select_one(
+            ".review__header .review__rating > .review-interaction__description"
+        )
         date_raw = date_tag.get_text(strip=True) if date_tag else None
 
-        reviews.append({
-            "text": text,
-            "source": SOURCE_NAME,
-            "doctor_url": doctor_url,
-            "date_raw": date_raw,
-            "date_iso": parse_review_date(date_raw),
-            "rating": parse_rating(card),
-            "site_sentiment": None,
-        })
+        reviews.append(
+            {
+                "text": text,
+                "source": SOURCE_NAME,
+                "doctor_url": doctor_url,
+                "date_raw": date_raw,
+                "date_iso": parse_review_date(date_raw),
+                "rating": parse_rating(card),
+                "site_sentiment": None,
+            }
+        )
 
     return reviews
 

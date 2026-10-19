@@ -1,7 +1,8 @@
 from contextlib import contextmanager
-from playwright.sync_api import sync_playwright, Page
 
-from sources.prodoctorov.config import USER_AGENT, LOCALE
+from playwright.sync_api import Page, sync_playwright
+
+from sources.prodoctorov.config import LOCALE, USER_AGENT
 
 
 @contextmanager

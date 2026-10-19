@@ -1,8 +1,12 @@
 import re
+
 from sources.base import DoctorRef
 from sources.prodoctorov.browser import get_page
 from sources.prodoctorov.config import (
-    BASE_DOMAIN, PAGE_LOAD_TIMEOUT_MS, BETWEEN_PAGES_DELAY_MS, MAX_PAGES_SAFETY_LIMIT,
+    BASE_DOMAIN,
+    BETWEEN_PAGES_DELAY_MS,
+    MAX_PAGES_SAFETY_LIMIT,
+    PAGE_LOAD_TIMEOUT_MS,
 )
 
 DOCTOR_LINK_PATTERN = re.compile(r"/vrach/(\d+-[^/#?]+)")
@@ -30,20 +34,23 @@ def list_doctors(speciality_slug: str, city: str) -> list[DoctorRef]:
                 """els => els.map(e => ({
                     href: e.href,
                     text: e.textContent.replace(/\\s+/g, ' ').trim()
-                }))"""
+                }))""",
             )
             page_slugs = set()
-            for l in links:
-                m = DOCTOR_LINK_PATTERN.search(l["href"])
+            for link in links:
+                m = DOCTOR_LINK_PATTERN.search(link["href"])
                 if not m:
                     continue
                 slug = m.group(1)
                 page_slugs.add(slug)
-                if l["text"] and len(l["text"]) > len(names.get(slug, "")):
-                    names[slug] = l["text"]
+                if link["text"] and len(link["text"]) > len(names.get(slug, "")):
+                    names[slug] = link["text"]
 
             new_count = len(page_slugs - all_slugs)
-            print(f"[DEBUG] Каталог {speciality_slug}/{city}, страница {page_num}: status={resp.status}, новых={new_count}, итого={len(all_slugs) + new_count}")
+            print(
+                f"[DEBUG] Каталог {speciality_slug}/{city}, страница {page_num}: "
+                f"status={resp.status}, новых={new_count}, итого={len(all_slugs) + new_count}"
+            )
 
             if resp.status != 200 or len(page_slugs) == 0:
                 break
@@ -58,6 +65,8 @@ def list_doctors(speciality_slug: str, city: str) -> list[DoctorRef]:
             page_num += 1
 
     return [
-        DoctorRef(site_doctor_id=slug, profile_url=build_doctor_url(slug, city), full_name=names.get(slug))
+        DoctorRef(
+            site_doctor_id=slug, profile_url=build_doctor_url(slug, city), full_name=names.get(slug)
+        )
         for slug in sorted(all_slugs)
     ]

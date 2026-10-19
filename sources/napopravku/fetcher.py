@@ -1,8 +1,12 @@
-from sources.napopravku.browser import get_page
-from sources.napopravku.config import PAGE_LOAD_TIMEOUT_MS, BETWEEN_PAGES_DELAY_MS, MAX_SHOW_MORE_CLICKS
-from sources.napopravku.parser import parse_reviews, parse_doctor_profile
-from sources.browser import goto_with_retry
 from ids import make_review_id
+from sources.browser import goto_with_retry
+from sources.napopravku.browser import get_page
+from sources.napopravku.config import (
+    BETWEEN_PAGES_DELAY_MS,
+    MAX_SHOW_MORE_CLICKS,
+    PAGE_LOAD_TIMEOUT_MS,
+)
+from sources.napopravku.parser import parse_doctor_profile, parse_reviews
 
 SHOW_MORE_SELECTOR = ".doctor-review__btn-wrapper button.doctor-review__btn"
 SORT_BY_DATE_SELECTOR = "text=по дате"
@@ -13,7 +17,10 @@ def _sort_reviews_by_date(page) -> None:
         page.click(SORT_BY_DATE_SELECTOR, timeout=5_000)
         page.wait_for_timeout(BETWEEN_PAGES_DELAY_MS)
     except Exception:
-        print("[WARNING] Не удалось переключить сортировку отзывов на 'по дате' — порядок может быть ненадёжным.")
+        print(
+            "[WARNING] Не удалось переключить сортировку отзывов на 'по дате' — "
+            "порядок может быть ненадёжным."
+        )
 
 
 def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> tuple[list[dict], dict]:
@@ -33,7 +40,10 @@ def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> tuple[lis
             ids_so_far = {make_review_id(r) for r in all_reviews_so_far}
 
             if known_review_ids and ids_so_far & known_review_ids:
-                print(f"[DEBUG] napopravku: найдены уже известные отзывы после {clicks} кликов 'Показать ещё', останавливаюсь.")
+                print(
+                    f"[DEBUG] napopravku: найдены уже известные отзывы "
+                    f"после {clicks} кликов 'Показать ещё', останавливаюсь."
+                )
                 break
 
             show_more = page.query_selector(SHOW_MORE_SELECTOR)
@@ -52,7 +62,9 @@ def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> tuple[lis
         html = page.content()
         all_reviews = parse_reviews(html, profile_url)
 
-    new_reviews = all_reviews if not known_review_ids else [
-        r for r in all_reviews if make_review_id(r) not in known_review_ids
-    ]
+    new_reviews = (
+        all_reviews
+        if not known_review_ids
+        else [r for r in all_reviews if make_review_id(r) not in known_review_ids]
+    )
     return new_reviews, profile

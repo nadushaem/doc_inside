@@ -1,0 +1,32 @@
+repos:
+  # базовые проверки гигиены репозитория
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files   # не даёт закоммитить большие json с отзывами
+        args: ["--maxkb=500"]
+      - id: detect-private-key
+      - id: debug-statements          # ловит забытые breakpoint() / pdb
+
+  # линтер + форматтер
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      - id: ruff-check
+        args: ["--fix"]
+      - id: ruff-format
+
+  # страховка на случай git add -f: данные и настройки IDE в репозиторий не попадают никогда
+  - repo: local
+    hooks:
+      - id: forbid-data-and-ide
+        name: запрет коммита .env, data/ и .idea/
+        entry: "файлы .env, data/ и .idea/ нельзя коммитить"
+        language: fail
+        files: ^(\.env|data/|\.idea/)

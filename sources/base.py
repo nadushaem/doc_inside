@@ -1,8 +1,9 @@
-from typing import Protocol, NamedTuple
+from typing import NamedTuple, Protocol
 
 
 class DoctorRef(NamedTuple):
     """Ссылка на врача внутри конкретного источника."""
+
     site_doctor_id: str
     profile_url: str
     full_name: str | None = None
@@ -18,7 +19,9 @@ class Source(Protocol):
         ...
 
     def fetch_new_reviews(
-            self, doctor: DoctorRef, known_review_ids: set[str],
+        self,
+        doctor: DoctorRef,
+        known_review_ids: set[str],
     ) -> tuple[list[dict], dict]:
         """
         Новые отзывы врача, которых ещё нет в known_review_ids.

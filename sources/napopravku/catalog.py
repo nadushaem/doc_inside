@@ -1,9 +1,13 @@
 from sources.base import DoctorRef
-from sources.napopravku.browser import get_page
 from sources.browser import goto_with_retry
+from sources.napopravku.browser import get_page
 from sources.napopravku.config import (
-    BASE_DOMAIN, PAGE_LOAD_TIMEOUT_MS, BETWEEN_PAGES_DELAY_MS,
-    MAX_PAGES_SAFETY_LIMIT, CITY_SLUGS, SPECIALITY_SLUGS,
+    BASE_DOMAIN,
+    BETWEEN_PAGES_DELAY_MS,
+    CITY_SLUGS,
+    MAX_PAGES_SAFETY_LIMIT,
+    PAGE_LOAD_TIMEOUT_MS,
+    SPECIALITY_SLUGS,
 )
 
 
@@ -35,7 +39,7 @@ def list_doctors(speciality_slug: str, city: str) -> list[DoctorRef]:
                         href: link ? link.href : null,
                         name: link ? link.textContent.trim() : null
                     };
-                })"""
+                })""",
             )
 
             new_count = 0
@@ -48,8 +52,9 @@ def list_doctors(speciality_slug: str, city: str) -> list[DoctorRef]:
                 doctors[site_id] = {"url": card["href"], "name": card["name"]}
 
             print(
-                f"[DEBUG] Каталог napopravku {speciality_slug}/{city}, страница {page_num}: status={resp.status}, новых={new_count}, итого={len(doctors)}")
-
+                f"[DEBUG] Каталог napopravku {speciality_slug}/{city}, страница {page_num}: "
+                f"status={resp.status}, новых={new_count}, итого={len(doctors)}"
+            )
             if resp.status != 200 or len(cards) == 0:
                 break
             if page_num > 1 and new_count == 0:

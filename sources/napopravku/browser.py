@@ -1,8 +1,10 @@
 from contextlib import contextmanager
-from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeoutError
+
+from playwright.sync_api import Page, sync_playwright
 
 from sources.napopravku.config import (
-    USER_AGENT, LOCALE, GOTO_RETRIES, GOTO_RETRY_DELAY_MS,
+    LOCALE,
+    USER_AGENT,
 )
 
 

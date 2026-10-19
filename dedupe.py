@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from itertools import combinations
 
-from storage import load_json, save_json, json_exists
+from storage import json_exists, load_json, save_json
 
 INDEX_PATH = "data/processed/doctors/index.json"
 MATCHES_PATH = "data/processed/doctors/matches.json"
@@ -12,16 +12,16 @@ MANUAL_DECISIONS_PATH = "data/processed/doctors/manual_decisions.json"
 UNPARSED_PATH = "data/processed/doctors/unparsed_names.json"
 
 # --- пороги скоринга ---
-AUTO_THRESHOLD_EXACT = 3.5   # полное ФИО + хоть что-то не противоречит
-AUTO_THRESHOLD_FUZZY = 5.0   # нечёткое ФИО + совпали и год, и вуз
-REVIEW_THRESHOLD = 1.5       # ниже — считаем тёзками и не показываем
+AUTO_THRESHOLD_EXACT = 3.5  # полное ФИО + хоть что-то не противоречит
+AUTO_THRESHOLD_FUZZY = 5.0  # нечёткое ФИО + совпали и год, и вуз
+REVIEW_THRESHOLD = 1.5  # ниже — считаем тёзками и не показываем
 
 SURNAME_TYPO_THRESHOLD = 0.85
 PATRONYMIC_TYPO_STRONG = 0.8
 PATRONYMIC_TYPO_WEAK = 0.65
 NAME_VARIANT_THRESHOLD = 0.6
 SLUG_MATCH_THRESHOLD = 0.85
-SLUG_OWN_THRESHOLD = 0.8      # если slug непохож на свою фамилию — это старая фамилия
+SLUG_OWN_THRESHOLD = 0.8  # если slug непохож на свою фамилию — это старая фамилия
 UNI_FUZZY_THRESHOLD = 0.8
 MAX_BLOCK_SIZE = 60
 
@@ -54,10 +54,37 @@ PATRONYMIC_RE = re.compile(r"(вич|вна|чна)$")
 FEMALE_SURNAME_RE = re.compile(r"(ова|ева|ина|ына|ая|айте|ене|уте)$")
 
 TRANSLIT = {
-    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ж": "zh", "з": "z",
-    "и": "i", "й": "y", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p",
-    "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f", "х": "h", "ц": "c", "ч": "ch",
-    "ш": "sh", "щ": "sh", "ъ": "", "ы": "y", "ь": "", "ю": "yu", "я": "ya",
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "h",
+    "ц": "c",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "sh",
+    "ъ": "",
+    "ы": "y",
+    "ь": "",
+    "ю": "yu",
+    "я": "ya",
 }
 
 
@@ -82,7 +109,7 @@ def patronymic_root(patr: str) -> str:
         root = patr
         for suf in PATRONYMIC_SUFFIXES:
             if root.endswith(suf) and len(root) > len(suf) + 1:
-                root = root[:-len(suf)]
+                root = root[: -len(suf)]
                 break
     return canon(root).rstrip("и")
 
@@ -119,25 +146,26 @@ def parse_full_name(raw: str | None) -> Name | None:
     tokens: list[str] = []
     for t in _clean(re.sub(r"\(.*?\)", " ", low)).split():
         if t in TURKIC_MARKERS and tokens:
-            tokens[-1] += " " + t          # «Рафиг кызы» — одно отчество
+            tokens[-1] += " " + t  # «Рафиг кызы» — одно отчество
         else:
             tokens.append(t)
     if len(tokens) < 2:
         return None
 
-    idx = next((i for i, t in enumerate(tokens)
-                if i >= 1 and (" " in t or PATRONYMIC_RE.search(t))), None)
+    idx = next(
+        (i for i, t in enumerate(tokens) if i >= 1 and (" " in t or PATRONYMIC_RE.search(t))), None
+    )
     guessed = False
     if idx is None:
         if len(tokens) == 2:
             sur, name, patr = tokens[:1], tokens[1], ""
-        elif len(tokens) == 3:             # «Яблонскайте Оксана Вито»
+        elif len(tokens) == 3:  # «Яблонскайте Оксана Вито»
             sur, name, patr, guessed = tokens[:1], tokens[1], tokens[2], True
         else:
             return None
-    elif idx >= 2:                         # Фамилия Имя Отчество [мусор]
-        sur, name, patr = tokens[:idx - 1], tokens[idx - 1], tokens[idx]
-    else:                                  # Имя Отчество Фамилия
+    elif idx >= 2:  # Фамилия Имя Отчество [мусор]
+        sur, name, patr = tokens[: idx - 1], tokens[idx - 1], tokens[idx]
+    else:  # Имя Отчество Фамилия
         sur, name, patr = tokens[2:3], tokens[0], tokens[1]
     if not sur:
         return None
@@ -181,22 +209,58 @@ def attach_slug_surname(name: Name, info: dict) -> None:
 # ======================================================================
 
 UNI_STOPWORDS = {
-    "фгбоу", "гбоу", "гоу", "фгоу", "во", "впо", "федеральное", "государственное",
-    "бюджетное", "образовательное", "учреждение", "высшего", "профессионального",
-    "образования", "минздрава", "минздравсоцразвития", "россии", "рф", "мз",
-    "министерства", "здравоохранения", "российской", "федерации", "имени", "им",
-    "государственный", "государственная", "медицинский", "медицинская",
-    "университет", "академия", "институт", "екатеринбург", "г", "по", "специальности",
+    "фгбоу",
+    "гбоу",
+    "гоу",
+    "фгоу",
+    "во",
+    "впо",
+    "федеральное",
+    "государственное",
+    "бюджетное",
+    "образовательное",
+    "учреждение",
+    "высшего",
+    "профессионального",
+    "образования",
+    "минздрава",
+    "минздравсоцразвития",
+    "россии",
+    "рф",
+    "мз",
+    "министерства",
+    "здравоохранения",
+    "российской",
+    "федерации",
+    "имени",
+    "им",
+    "государственный",
+    "государственная",
+    "медицинский",
+    "медицинская",
+    "университет",
+    "академия",
+    "институт",
+    "екатеринбург",
+    "г",
+    "по",
+    "специальности",
 }
-COURSE_RE = re.compile(r"повышени\w* квалификац|переподготовк|сестринское дело в косметолог"
-                       r"|мезотерап|интенсив|дополнительное образование")
+COURSE_RE = re.compile(
+    r"повышени\w* квалификац|переподготовк|сестринское дело в косметолог"
+    r"|мезотерап|интенсив|дополнительное образование"
+)
 COLLEGE_RE = re.compile(r"колледж|училищ|техникум|школа красоты|институт (эстетики|красоты)")
 
 # порядок важен: более специфичные правила выше
 UNI_RULES = [
     ("ugmado", r"уральск\w* государственн\w* медицинск\w* академи\w* дополнительн"),
-    ("usmu", r"уральск\w* (государственн\w* )?медицинск|свердловск\w* государственн\w*.*медицинск\w* институт"
-             r"|\bугм[ау]\b"),
+    (
+        "usmu",
+        r"уральск\w* (государственн\w* )?медицинск"
+        r"|свердловск\w* государственн\w*.*медицинск\w* институт"
+        r"|\bугм[ау]\b",
+    ),
     ("tyumen", r"тюменск\w*.*медицинск"),
     ("perm", r"пермск\w*.*медицинск|\bпгму\b"),
     ("susmu", r"южно уральск\w*.*медицинск|челябинск\w*.*медицинск|\bюугму\b"),
@@ -273,6 +337,7 @@ def parse_education(info: dict) -> Education:
 # КЛАССИФИКАЦИЯ И СКОРИНГ ПАР
 # ======================================================================
 
+
 @dataclass
 class Person:
     key: str
@@ -304,8 +369,11 @@ def classify(pa: Name, pb: Name) -> tuple[str, float] | None:
     if same_name and same_patr:
         if pa.surname_parts & pb.surname_parts:
             return "double_surname", 1.5
-        if (pa.maiden_parts & pb.surname_parts or pb.maiden_parts & pa.surname_parts
-                or pa.maiden_parts & pb.maiden_parts):
+        if (
+            pa.maiden_parts & pb.surname_parts
+            or pb.maiden_parts & pa.surname_parts
+            or pa.maiden_parts & pb.maiden_parts
+        ):
             return "maiden_bracket", 1.5
         w = slug_signal(pa, pb)
         if w:
@@ -332,7 +400,9 @@ def classify(pa: Name, pb: Name) -> tuple[str, float] | None:
     return None
 
 
-def score_pair(kind: str, base: float, a: Person, b: Person, namesakes: bool) -> tuple[float, list[str], bool]:
+def score_pair(
+    kind: str, base: float, a: Person, b: Person, namesakes: bool
+) -> tuple[float, list[str], bool]:
     score, notes, veto = base, [f"{KIND_BASE_TITLES[kind]} (+{base})"], False
     ea, eb = a.edu, b.edu
 
@@ -384,18 +454,31 @@ def pair_id(key_a: str, key_b: str) -> str:
 
 def make_pair(a: Person, b: Person, kind: str, score: float, notes: list[str]) -> dict:
     def doc(p: Person):
-        return {"key": p.key, "source": p.info["source"], "profile_url": p.info["profile_url"],
-                "full_name": p.info.get("full_name"), "university": p.info.get("university"),
-                "university_id": p.edu.uni_id, "graduation_year": p.edu.year,
-                "specialities": p.info["specialities"]}
-    return {"pair_id": pair_id(a.key, b.key), "kind": kind, "score": round(score, 2),
-            "same_source": a.info["source"] == b.info["source"],
-            "reason": "; ".join(notes), "doctors": [doc(a), doc(b)]}
+        return {
+            "key": p.key,
+            "source": p.info["source"],
+            "profile_url": p.info["profile_url"],
+            "full_name": p.info.get("full_name"),
+            "university": p.info.get("university"),
+            "university_id": p.edu.uni_id,
+            "graduation_year": p.edu.year,
+            "specialities": p.info["specialities"],
+        }
+
+    return {
+        "pair_id": pair_id(a.key, b.key),
+        "kind": kind,
+        "score": round(score, 2),
+        "same_source": a.info["source"] == b.info["source"],
+        "reason": "; ".join(notes),
+        "doctors": [doc(a), doc(b)],
+    }
 
 
 # ======================================================================
 # КЛАСТЕРЫ
 # ======================================================================
+
 
 class DSU:
     def __init__(self):
@@ -437,19 +520,22 @@ def build_clusters(buckets: dict, index: dict) -> list[dict]:
                 problems.append(f"пара {pid} отклонена вручную, но попала в кластер транзитивно")
             elif index[a]["source"] == index[b]["source"] and pid not in confirmed:
                 problems.append(f"два профиля одного источника без подтверждения: {pid}")
-        clusters.append({
-            "cluster_id": f"cluster_{i:05d}",
-            "keys": sorted(keys),
-            "sources": dict(per_source),
-            "needs_review": bool(problems),
-            "problems": problems,
-        })
+        clusters.append(
+            {
+                "cluster_id": f"cluster_{i:05d}",
+                "keys": sorted(keys),
+                "sources": dict(per_source),
+                "needs_review": bool(problems),
+                "problems": problems,
+            }
+        )
     return clusters
 
 
 # ======================================================================
 # MAIN
 # ======================================================================
+
 
 def main():
     index = load_json(INDEX_PATH)
@@ -523,20 +609,31 @@ def main():
     save_json({**buckets, "clusters": clusters}, MATCHES_PATH)
 
     # ---------- диагностика ----------
-    print(f"[DEBUG] Врачей в индексе: {len(index)}, ФИО не разобрано: {len(unparsed)}, "
-          f"пар-кандидатов: {len(candidates)}")
-    print(f"[DEBUG] Автосовпадений: {len(buckets['auto'])}, подтверждено: {len(buckets['manual_confirmed'])}, "
-          f"отклонено: {len(buckets['manual_rejected'])}, ждут проверки: {len(buckets['pending'])}")
+    print(
+        f"[DEBUG] Врачей в индексе: {len(index)}, ФИО не разобрано: {len(unparsed)}, "
+        f"пар-кандидатов: {len(candidates)}"
+    )
+    print(
+        f"[DEBUG] Автосовпадений: {len(buckets['auto'])}, "
+        f"подтверждено: {len(buckets['manual_confirmed'])}, "
+        f"отклонено: {len(buckets['manual_rejected'])}, "
+        f"ждут проверки: {len(buckets['pending'])}"
+    )
     print(f"[DEBUG] Отброшено: {dict(skipped)}")
 
     for title, bucket in (("auto", buckets["auto"]), ("pending", buckets["pending"])):
         by_kind = Counter(p["kind"] for p in bucket)
-        print(f"    {title}: " + ", ".join(f"{KIND_BASE_TITLES[k]}={by_kind[k]}" for k in KIND_ORDER if by_kind[k]))
+        print(
+            f"    {title}: "
+            + ", ".join(f"{KIND_BASE_TITLES[k]}={by_kind[k]}" for k in KIND_ORDER if by_kind[k])
+        )
 
     in_clusters = sum(len(c["keys"]) for c in clusters)
-    print(f"\n[DEBUG] Кластеров: {len(clusters)} (записей в них {in_clusters}, "
-          f"лишних записей {in_clusters - len(clusters)}); требуют проверки: "
-          f"{sum(c['needs_review'] for c in clusters)}")
+    print(
+        f"\n[DEBUG] Кластеров: {len(clusters)} (записей в них {in_clusters}, "
+        f"лишних записей {in_clusters - len(clusters)}); требуют проверки: "
+        f"{sum(c['needs_review'] for c in clusters)}"
+    )
     for c in clusters:
         if c["needs_review"]:
             names = [index[k].get("full_name") for k in c["keys"]]
@@ -545,20 +642,33 @@ def main():
                 print(f"        ! {pr}")
 
     if unparsed:
-        save_json([{"key": k, "full_name": index[k].get("full_name"),
-                    "profile_url": index[k]["profile_url"]} for k in unparsed], UNPARSED_PATH)
+        save_json(
+            [
+                {
+                    "key": k,
+                    "full_name": index[k].get("full_name"),
+                    "profile_url": index[k]["profile_url"],
+                }
+                for k in unparsed
+            ],
+            UNPARSED_PATH,
+        )
         print(f"\n[DEBUG] Не разобрано ФИО: {len(unparsed)}, список в {UNPARSED_PATH}")
 
     if buckets["pending"]:
         print("\n=== Ручная проверка ===")
-        print(f"Решения вписывай в {MANUAL_DECISIONS_PATH} в виде {{\"pair_id\": true/false}}\n")
+        print(f'Решения вписывай в {MANUAL_DECISIONS_PATH} в виде {{"pair_id": true/false}}\n')
     for i, pair in enumerate(buckets["pending"], 1):
         mark = " [ОДИН ИСТОЧНИК]" if pair["same_source"] else ""
-        print(f"[{i}/{len(buckets['pending'])}] [{KIND_BASE_TITLES[pair['kind']]}]{mark} "
-              f"балл {pair['score']}: {pair['reason']}")
+        print(
+            f"[{i}/{len(buckets['pending'])}] [{KIND_BASE_TITLES[pair['kind']]}]{mark} "
+            f"балл {pair['score']}: {pair['reason']}"
+        )
         for d in pair["doctors"]:
-            print(f"    {d['source']:<12} {d['full_name']} | {d['university_id'] or d['university']} "
-                  f"| {d['graduation_year']}  {d['profile_url']}")
+            print(
+                f"    {d['source']:<12} {d['full_name']} | {d['university_id'] or d['university']} "
+                f"| {d['graduation_year']}  {d['profile_url']}"
+            )
         print(f"    pair_id: {pair['pair_id']}\n")
 
 

@@ -1,5 +1,6 @@
 # merge.py
 import hashlib
+
 from storage import load_json, save_json
 
 INDEX_PATH = "data/processed/doctors/index.json"
@@ -25,7 +26,10 @@ class UnionFind:
 
 
 def make_person_id(cluster_keys: list[str]) -> str:
-    """Хэш от отсортированных ключей источников — детерминирован, не зависит от порядка обработки."""
+    """
+    Хэш от отсортированных ключей источников.
+    Детерминирован и не зависит от порядка обработки.
+    """
     raw = "|".join(sorted(cluster_keys))
     return "person_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
@@ -50,9 +54,14 @@ def main():
     for keys in clusters.values():
         person_id = make_person_id(keys)
         entries = [index[k] for k in keys]
-        best = max(entries, key=lambda e: (
-            bool(e.get("full_name")), bool(e.get("university")), bool(e.get("graduation_year"))
-        ))
+        best = max(
+            entries,
+            key=lambda e: (
+                bool(e.get("full_name")),
+                bool(e.get("university")),
+                bool(e.get("graduation_year")),
+            ),
+        )
         merged[person_id] = {
             "full_name": best.get("full_name"),
             "university": best.get("university"),
@@ -60,7 +69,11 @@ def main():
             "city": best.get("city"),
             "specialities": sorted({s for e in entries for s in e["specialities"]}),
             "sources": [
-                {"source": e["source"], "site_doctor_id": e["site_doctor_id"], "profile_url": e["profile_url"]}
+                {
+                    "source": e["source"],
+                    "site_doctor_id": e["site_doctor_id"],
+                    "profile_url": e["profile_url"],
+                }
                 for e in entries
             ],
         }
