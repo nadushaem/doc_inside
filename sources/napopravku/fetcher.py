@@ -16,7 +16,7 @@ def _sort_reviews_by_date(page) -> None:
         print("[WARNING] Не удалось переключить сортировку отзывов на 'по дате' — порядок может быть ненадёжным.")
 
 
-def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> list[dict]:
+def fetch_new_reviews(profile_url: str, known_review_ids: set[str]) -> tuple[list[dict], dict]:
     with get_page() as page:
         goto_with_retry(page, profile_url, PAGE_LOAD_TIMEOUT_MS)
         page.wait_for_timeout(BETWEEN_PAGES_DELAY_MS)
