@@ -1,0 +1,18 @@
+# окружение
+.venv/
+venv/
+.env
+
+# python
+__pycache__/
+*.pyc
+
+# инструменты
+.ruff_cache/
+.pytest_cache/
+
+# IDE
+.idea/
+
+# собранные отзывы и индексы врачей
+data/
